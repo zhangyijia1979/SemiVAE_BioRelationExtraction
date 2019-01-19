@@ -8,6 +8,7 @@ import sys
 import time
 
 import h5py
+from keras import layers
 from keras import metrics
 from keras.models import Model,load_model
 from keras.layers import Dense, Dropout, Activation,Input,Convolution1D,LSTM,Embedding, Merge
@@ -153,7 +154,7 @@ if __name__ == '__main__':
         s = {
              'emb_dimension':100, # dimension of word embedding
              'batch_size':64,
-             'epochs':5,
+             'epochs':10,
              'class_num':5,
             'dropout':0.5,
             'train_file': "./train.pkl",
@@ -167,7 +168,7 @@ if __name__ == '__main__':
             'decoder_hidden_layer_3': 1000,
             'latent_dim':32,
             'sentence_length':150,
-            'labeled_data_size':200,
+            'labeled_data_size':2000,
             'validate_rate':0.1,
             'entity_sequence_length':30
             }
@@ -353,9 +354,10 @@ if __name__ == '__main__':
             input_entity_sequence = Input(shape=(s['entity_sequence_length'],), dtype='int32', name='input_entity_sequence')
             entity_sequence_fea = wordembedding(input_entity_sequence)
 
-            input_label = Input(batch_shape=(s['batch_size'], s['class_num']), dtype='float32', name='input_label')
+            input_label = Input(shape=( s['class_num'],), dtype='float32', name='input_label')
 
-            emb_merge = Merge(mode='concat')([all_word_fea, all_dis_fea1,all_dis_fea2])
+            #emb_merge = Merge(mode='concat')([all_word_fea, all_dis_fea1,all_dis_fea2])
+            emb_merge = layers.concatenate([all_word_fea, all_dis_fea1, all_dis_fea2], axis=-1)
 
             ##embed layer dropout
 
@@ -388,7 +390,8 @@ if __name__ == '__main__':
                              inner_activation='sigmoid',
                              go_backwards=True)(entity_sequence_fea)
 
-            lstm_merge = Merge(mode='concat')([left_lstm, right_lstm])
+            #lstm_merge = Merge(mode='concat')([left_lstm, right_lstm])
+            lstm_merge = layers.concatenate([left_lstm, right_lstm], axis=-1)
             lstm_merge = Dropout(0.5)(lstm_merge)
 
             _z_mean = Dense(s['latent_dim'])(lstm_merge)
@@ -397,6 +400,7 @@ if __name__ == '__main__':
             z = Lambda(sampling, output_shape=(s['latent_dim'],))([_z_mean, _z_log_var])
 
             labed_data_merged = Merge(mode='concat')([input_label, z])
+            labed_data_merged = layers.concatenate([input_label, z], axis=-1)
 
             decoder_layers = [ Dense(s['entity_sequence_length'] * s['decoder_hidden_layer_1']),
                 Reshape((s['entity_sequence_length'], s['decoder_hidden_layer_1'])),
@@ -424,7 +428,8 @@ if __name__ == '__main__':
             label_decoder_word_mean = Dense(s['vocsize'], activation='softmax')(label_dec_out)
 
 
-            unlabel_data_merged = Merge(mode='concat')([classify_output, z])
+            #unlabel_data_merged = Merge(mode='concat')([classify_output, z])
+            unlabel_data_merged = layers.concatenate([classify_output, z], axis=-1)
 
             unlabel_dec_out = inst_layers(decoder_layers, unlabel_data_merged)
 
@@ -437,16 +442,16 @@ if __name__ == '__main__':
                 [input_entity_sequence, unlabel_decoder_word_mean, _z_mean, _z_log_var])
 
             label_ddi_vae = Model(
-                input=[input_all_word, input_all_dis1, input_all_dis2, input_entity_sequence, input_label],
-                output=_output)
+                inputs=[input_all_word, input_all_dis1, input_all_dis2, input_entity_sequence, input_label],
+                outputs=_output)
 
             keras_opt = RMSprop(lr=0.001, rho=0.9, epsilon=1e-06)
 
             label_ddi_vae.compile(optimizer=keras_opt, loss=None)
             label_ddi_vae.summary()
 
-            unlabel_ddi_vae = Model(input=[input_all_word, input_all_dis1, input_all_dis2, input_entity_sequence],
-                                    output=_unlabeled_output)
+            unlabel_ddi_vae = Model(inputs=[input_all_word, input_all_dis1, input_all_dis2, input_entity_sequence],
+                                    outputs=_unlabeled_output)
 
             unlabel_ddi_vae.compile(optimizer=keras_opt, loss=None)
             unlabel_ddi_vae.summary()
